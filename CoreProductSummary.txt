@@ -1,0 +1,16 @@
+CORE PRODUCT SUMMARY (for context)
+
+We are building Mood Patterns + Wheel of Feels as a browser-based web app:
+
+- Tech: React + TypeScript + Tailwind CSS, no backend, no push notifications.
+- Storage: IndexedDB for all app data (feelings, check-ins, tags, scales, schedules).
+- Core purpose: Offline-first Ecological Momentary Assessment (EMA) mood diary.
+- Main flows:
+  - Fast check-in using a 3-ring Wheel/List of emotions.
+  - Optional context tags, numeric scales (e.g. energy/focus/stress), and notes.
+  - Insights/analytics computed locally.
+  - CHOOSENOTIF: local-only reminder helper (random or fixed) while app is open.
+- Hard constraints:
+  - No remote storage of mood data.
+  - No AI insights.
+  - No backend or push API for reminders.

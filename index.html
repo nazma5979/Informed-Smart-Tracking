@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>Mood Patterns + Wheel of Feels</title>
+    <meta name="description" content="Private, offline-first mood tracker with emotional granularity. Log feelings, track context, and visualize patterns without tracking." />
+    
+    <!-- Open Graph / Social -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Mood Patterns" />
+    <meta property="og:description" content="Private, offline-first mood tracker with emotional granularity." />
+    <meta property="og:image" content="https://cdn-icons-png.flaticon.com/512/9722/9722703.png" />
+    
+    <link rel="manifest" href="/metadata.json">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/9722/9722703.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <!-- Default theme color matches --bg-app (slate-50) -->
+    <meta name="theme-color" content="#f8fafc">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      /* Custom scrollbar for better aesthetics */
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent; 
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #cbd5e1; 
+        border-radius: 3px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #94a3b8; 
+      }
+
+      /* THEME DEFINITIONS */
+      :root {
+        /* ORIGINAL THEME (Default - Slate/Indigo) */
+        --bg-app: #f8fafc; /* slate-50 */
+        --bg-card: #ffffff;
+        --text-primary: #1e293b; /* slate-800 */
+        --text-secondary: #64748b; /* slate-500 */
+        --border-color: #e2e8f0; /* slate-200 */
+        --color-accent: #4f46e5; /* indigo-600 */
+        --color-accent-fg: #ffffff;
+        --color-accent-light: #e0e7ff; /* indigo-100 */
+        
+        /* Wheel Text Logic */
+        --text-on-slice: #ffffff;
+
+        --color-happy: #fbbf24;
+        --color-sad: #60a5fa;
+        --color-angry: #f87171;
+        --color-fearful: #a78bfa;
+        --color-disgusted: #a3e635;
+        --color-surprised: #34d399;
+        --color-bad: #2dd4bf;
+      }
+
+      /* LIGHT THEME (Books Light - Warm/Orange) */
+      [data-theme="light"] {
+        --bg-app: #fbfbfb;
+        --bg-card: #ffffff;
+        --text-primary: #000000;
+        --text-secondary: #4b5563;
+        --border-color: #e5e7eb;
+        --color-accent: #f58846; /* atomic-tangerine */
+        --color-accent-fg: #ffffff;
+        --color-accent-light: #ffedd5;
+        
+        /* Light theme needs dark text on wedges */
+        --text-on-slice: #2d2d2d;
+
+        --color-happy: #fcd466;
+        --color-sad: #6a82a7;
+        --color-angry: #f85b61;
+        --color-fearful: #6a82a7;
+        --color-disgusted: #a3c882;
+        --color-surprised: #5ca7a5;
+        --color-bad: #61b59e;
+      }
+
+      /* DARK THEME (Books Dark - High Contrast/Teal) */
+      [data-theme="dark"] {
+        --bg-app: #000000;
+        --bg-card: #111111;
+        --text-primary: #e5e5e5;
+        --text-secondary: #a3a3a3;
+        --border-color: #333333;
+        --color-accent: #277da1; /* cerulean */
+        --color-accent-fg: #ffffff;
+        --color-accent-light: #164e63;
+        
+        --text-on-slice: #ffffff;
+
+        --color-happy: #ffd166;
+        --color-sad: #48a9d4;
+        --color-angry: #ff6b6b;
+        --color-fearful: #7995b9;
+        --color-disgusted: #a8df85;
+        --color-surprised: #6ec2c0;
+        --color-bad: #5cc6a7;
+      }
+
+      /* SEPIA THEME (Books Sepia - Earthy/Rust) */
+      [data-theme="sepia"] {
+        --bg-app: #f8f1e3;
+        --bg-card: #fffbf5;
+        --text-primary: #2a241c;
+        --text-secondary: #5c554d;
+        --border-color: #e6ded1;
+        --color-accent: #d6625c; /* strawberry-redish */
+        --color-accent-fg: #ffffff;
+        --color-accent-light: #f5e6d3;
+
+        --text-on-slice: #2a241c;
+
+        --color-happy: #e6c35a;
+        --color-sad: #3f8aa8;
+        --color-angry: #d6625c;
+        --color-fearful: #688298;
+        --color-disgusted: #9fbe7a;
+        --color-surprised: #5ca39f;
+        --color-bad: #5fa78e;
+      }
+
+      /* GREY THEME (Books Grey - Muted/Slate) */
+      [data-theme="grey"] {
+        --bg-app: #5a5a5c;
+        --bg-card: #666668;
+        --text-primary: #f1f1f1;
+        --text-secondary: #bababa;
+        --border-color: #717173;
+        --color-accent: #8ba7c4; /* blue-slate */
+        --color-accent-fg: #1a202c;
+        --color-accent-light: #4a4a4c;
+
+        --text-on-slice: #1a202c;
+
+        --color-happy: #ffe178;
+        --color-sad: #5db5d8;
+        --color-angry: #ff7979;
+        --color-fearful: #8ba7c4;
+        --color-disgusted: #b2e391;
+        --color-surprised: #78cfd0;
+        --color-bad: #6ed3bb;
+      }
+
+      /* PASTEL THEME - Updated Palette */
+      [data-theme="pastel"] {
+        --bg-app: #e8e6ea;
+        --bg-card: #ffffff;
+        --text-primary: #5d576b;
+        --text-secondary: #8e889b;
+        --border-color: #dcd6e5; 
+        --color-accent: #5ec2bf; 
+        --color-accent-fg: #ffffff;
+        --color-accent-light: #dfffff; 
+        --text-on-slice: #4a4a4a;
+
+        --color-happy: #ffef9f;    
+        --color-sad: #90f1ef;      
+        --color-angry: #ffd6e0;    
+        --color-disgusted: #c1fba4;
+        --color-surprised: #7bf1a8;
+        
+        --color-fearful: #b8c1ec;  
+        --color-bad: #eebbc3;      
+      }
+
+      /* HIGH CONTRAST OVERRIDE */
+      .high-contrast {
+        --bg-app: #ffffff !important;
+        --bg-card: #ffffff !important;
+        --text-primary: #000000 !important;
+        --text-secondary: #000000 !important;
+        --border-color: #000000 !important;
+        --color-accent: #000000 !important;
+        --color-accent-fg: #ffffff !important;
+        --color-accent-light: #e5e5e5 !important;
+        --text-on-slice: #ffffff !important;
+      }
+
+      /* REDUCED MOTION */
+      .reduced-motion *, .reduced-motion *::before, .reduced-motion *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+      
+      /* WHEEL DEPTH ANIMATION - Spring loaded zoom */
+      @keyframes wheel-enter {
+        0% {
+          opacity: 0;
+          transform: scale(0.92);
+        }
+        100% {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+      
+      .animate-wheel-enter {
+        /* Using a spring-like bezier for a "pop" effect */
+        animation: wheel-enter 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+      }
+
+      /* GENERIC ANIMATIONS */
+      .animate-fade-in {
+        animation: fade-in 0.4s ease-out forwards;
+      }
+
+      .animate-fade-in-up {
+        animation: fade-in-up 0.5s ease-out forwards;
+      }
+      
+      @keyframes fade-in {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+
+      @keyframes fade-in-up {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+
+      /* VIEW TRANSITIONS (Native Feel) */
+      ::view-transition-old(root),
+      ::view-transition-new(root) {
+        animation-duration: 0.3s;
+      }
+
+      /* Safe Area Utilities for iOS */
+      .pb-safe {
+        padding-bottom: env(safe-area-inset-bottom, 20px);
+      }
+      .pt-safe {
+        padding-top: env(safe-area-inset-top, 20px);
+      }
+
+      /* Utility classes for dynamic accent colors */
+      .bg-app { background-color: var(--bg-app); }
+      .text-primary { color: var(--text-primary); }
+      .text-secondary { color: var(--text-secondary); }
+      .border-theme { border-color: var(--border-color); }
+      
+      .bg-accent { background-color: var(--color-accent); }
+      .text-accent { color: var(--color-accent); }
+      .bg-accent-light { background-color: var(--color-accent-light); }
+      .text-accent-fg { color: var(--color-accent-fg); }
+      
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.554.0",
+    "recharts": "https://aistudiocdn.com/recharts@^3.4.1",
+    "uuid": "https://aistudiocdn.com/uuid@^13.0.0"
+  }
+}
+</script>
+</head>
+  <body class="antialiased selection:bg-indigo-100 selection:text-indigo-700 h-screen overflow-hidden" style="background-color: var(--bg-app); color: var(--text-primary); user-select: none; -webkit-user-select: none; overscroll-behavior-y: none;">
+    <div id="root" class="h-full w-full"></div>
+  </body>
+</html>
