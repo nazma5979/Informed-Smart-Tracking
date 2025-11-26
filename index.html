@@ -1,8 +1,19 @@
+
 <!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- 
+      CACHE CONTROL:
+      As per best practices, we instruct the browser NOT to cache the HTML entry point.
+      This ensures the user always gets the latest version of the Service Worker and App Shell logic
+      from the server (or via the SW's Network First strategy).
+    -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+
     <title>Mood Patterns + Wheel of Feels</title>
     <meta name="description" content="Private, offline-first mood tracker with emotional granularity. Log feelings, track context, and visualize patterns without tracking." />
     
@@ -14,8 +25,21 @@
     
     <link rel="manifest" href="/metadata.json">
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/9722/9722703.png">
+    
+    <!-- PERFORMANCE: Preconnect to CDNs to reduce latency -->
+    <link rel="preconnect" href="https://cdn.tailwindcss.com">
+    <link rel="preconnect" href="https://aistudiocdn.com">
+    <link rel="preconnect" href="https://cdn-icons-png.flaticon.com">
+    
+    <!-- iOS Capable -->
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <!-- Status bar style: black-translucent allows content to flow under the status bar -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Mood">
+    
+    <!-- Android Capable -->
+    <meta name="mobile-web-app-capable" content="yes">
+    
     <!-- Default theme color matches --bg-app (slate-50) -->
     <meta name="theme-color" content="#f8fafc">
     <script src="https://cdn.tailwindcss.com"></script>
@@ -34,6 +58,38 @@
       }
       ::-webkit-scrollbar-thumb:hover {
         background: #94a3b8; 
+      }
+
+      /* Mobile Web Best Practices */
+      * {
+        -webkit-tap-highlight-color: transparent;
+      }
+      
+      body {
+        /* Prevent pull-to-refresh on mobile app shell */
+        overscroll-behavior-y: none;
+      }
+
+      /* Touch optimization: Remove 300ms delay on interactive elements */
+      button, a, input, select, textarea {
+        touch-action: manipulation;
+      }
+
+      /* 
+         Native-like Active State 
+         Mimics the feel of a native app button press 
+         Usage: Add 'active-press' class to clickable elements
+      */
+      .active-press:active {
+        opacity: 0.7;
+        transform: scale(0.96);
+        transition: transform 0.05s ease-out, opacity 0.05s ease-out;
+      }
+      
+      /* Global Focus Visible Style for Accessibility on Hybrid Devices */
+      :focus-visible {
+        outline: 2px solid #4f46e5;
+        outline-offset: 2px;
       }
 
       /* THEME DEFINITIONS */
@@ -228,10 +284,39 @@
         to { opacity: 1; transform: translateY(0); }
       }
 
-      /* VIEW TRANSITIONS (Native Feel) */
-      ::view-transition-old(root),
+      /* 
+         VIEW TRANSITIONS (Native App Feel) 
+         Implements a Zoom/Fade effect similar to Android 14.
+      */
+      
+      /* The old screen fades out and zooms out slightly */
+      ::view-transition-old(root) {
+        animation: 
+          90ms cubic-bezier(0.4, 0, 1, 1) both fade-out,
+          300ms cubic-bezier(0.4, 0, 0.2, 1) both zoom-out;
+      }
+
+      /* The new screen fades in and zooms in from slightly larger */
       ::view-transition-new(root) {
-        animation-duration: 0.3s;
+        animation: 
+          210ms cubic-bezier(0, 0, 0.2, 1) 90ms both fade-in,
+          300ms cubic-bezier(0.4, 0, 0.2, 1) both zoom-in;
+      }
+
+      @keyframes fade-in {
+        from { opacity: 0; }
+      }
+
+      @keyframes fade-out {
+        to { opacity: 0; }
+      }
+
+      @keyframes zoom-in {
+        from { transform: scale(0.92); }
+      }
+
+      @keyframes zoom-out {
+        to { transform: scale(1.08); }
       }
 
       /* Safe Area Utilities for iOS */
@@ -267,7 +352,7 @@
 }
 </script>
 </head>
-  <body class="antialiased selection:bg-indigo-100 selection:text-indigo-700 h-screen overflow-hidden" style="background-color: var(--bg-app); color: var(--text-primary); user-select: none; -webkit-user-select: none; overscroll-behavior-y: none;">
+  <body class="antialiased selection:bg-indigo-100 selection:text-indigo-700 h-screen overflow-hidden" style="background-color: var(--bg-app); color: var(--text-primary); overscroll-behavior-y: none;">
     <div id="root" class="h-full w-full"></div>
   </body>
 </html>

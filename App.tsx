@@ -1,31 +1,33 @@
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, Suspense, useCallback } from 'react';
 import Layout from './components/Layout';
 import { AppSettings, CheckIn, ContextTag, ScreenName } from './types';
 import { db } from './services/db';
 import { Scheduler } from './utils/scheduler';
-import HomeScreen from './screens/HomeScreen';
-import CheckInScreen from './screens/CheckInScreen';
-import SettingsScreen from './screens/SettingsScreen';
-import InsightsScreen from './screens/InsightsScreen';
-import OnboardingScreen from './screens/OnboardingScreen';
 import ReminderBanner from './components/ReminderBanner';
 import { DEFAULT_TAGS } from './constants';
+import { useAppData } from './hooks/useAppData';
+import { useReminders } from './hooks/useReminders';
+import { usePWA } from './hooks/usePWA';
+import { useAdaptiveConfig } from './hooks/useAdaptiveConfig';
+import { Haptics } from './utils/haptics';
 
-// Add missing type definition for startViewTransition API which is experimental
+// Lazy Load Screens for Performance
+const HomeScreen = React.lazy(() => import('./screens/HomeScreen'));
+const CheckInScreen = React.lazy(() => import('./screens/CheckInScreen'));
+const SettingsScreen = React.lazy(() => import('./screens/SettingsScreen'));
+const InsightsScreen = React.lazy(() => import('./screens/InsightsScreen'));
+const OnboardingScreen = React.lazy(() => import('./screens/OnboardingScreen'));
+
 declare global {
   interface Document {
     startViewTransition?: (callback: () => void) => void;
   }
 }
 
-const UNLOCK_COUNT_THRESHOLD = 10;
-const UNLOCK_DAYS_THRESHOLD = 7;
-const PAGE_SIZE = 20;
-
 // Map themes to their primary background/header color for the meta tag
 const THEME_COLORS: Record<string, string> = {
-  'original': '#f8fafc', // slate-50 (bg-app) or #4f46e5 (primary). Usually better to match header/bg. Let's match bg-app.
+  'original': '#f8fafc', 
   'light': '#fbfbfb',
   'dark': '#000000',
   'sepia': '#f8f1e3',
@@ -33,239 +35,219 @@ const THEME_COLORS: Record<string, string> = {
   'pastel': '#e8e6ea'
 };
 
+// Adaptive Skeleton Loader with CLS Protection
+const AppSkeleton = () => (
+    <div className="h-[100dvh] w-full flex bg-slate-50 overflow-hidden flex-col md:flex-row">
+        {/* Desktop Rail Placeholder */}
+        <div className="hidden md:flex w-24 border-r border-slate-200 bg-white flex-col items-center py-6 gap-6 shrink-0">
+             <div className="w-10 h-10 rounded-xl bg-slate-200 animate-pulse"></div>
+             <div className="w-12 h-12 rounded-2xl bg-slate-200 animate-pulse mt-auto"></div>
+        </div>
+
+        {/* Main Content */}
+        <div className="flex-1 flex flex-col relative max-w-2xl mx-auto w-full border-x border-slate-200 bg-white min-h-0">
+            {/* Header Placeholder */}
+            <div className="h-16 border-b border-slate-100 flex items-center px-4 gap-4 flex-none">
+                 <div className="w-8 h-8 rounded-full bg-slate-200 animate-pulse md:hidden"></div>
+                 <div className="h-6 w-32 bg-slate-200 rounded-lg animate-pulse"></div>
+            </div>
+            
+            <div className="p-6 space-y-6 animate-pulse flex-1 overflow-hidden">
+                {/* Hero Card */}
+                <div className="h-48 w-full bg-slate-200 rounded-3xl"></div>
+                
+                {/* List Items */}
+                <div className="space-y-4 pt-4">
+                    <div className="h-24 w-full bg-slate-200 rounded-2xl"></div>
+                    <div className="h-24 w-full bg-slate-200 rounded-2xl"></div>
+                    <div className="h-24 w-full bg-slate-200 rounded-2xl"></div>
+                </div>
+            </div>
+        </div>
+
+        {/* Mobile Bottom Nav Placeholder (Prevents Layout Shift) - HEIGHT MATCHES REAL NAV */}
+        <div className="md:hidden flex-none h-[88px] border-t border-slate-200 bg-white flex justify-between items-start px-8 pt-2 pb-safe">
+             <div className="w-10 h-10 rounded-lg bg-slate-200 animate-pulse mt-1"></div>
+             <div className="w-14 h-14 rounded-full bg-slate-200 animate-pulse -mt-4 border-4 border-slate-50"></div>
+             <div className="w-10 h-10 rounded-lg bg-slate-200 animate-pulse mt-1"></div>
+        </div>
+    </div>
+);
+
 const App: React.FC = () => {
-  const [loading, setLoading] = useState(true);
-  const [currentScreen, setCurrentScreen] = useState<ScreenName>('HOME');
-  const [settings, setSettings] = useState<AppSettings | null>(null);
-  const [checkIns, setCheckIns] = useState<CheckIn[]>([]);
-  const [totalCheckInCount, setTotalCheckInCount] = useState(0);
-  const [daysTracked, setDaysTracked] = useState(0);
-  const [customTags, setCustomTags] = useState<ContextTag[]>([]);
+  // ROUTING INITIALIZATION: Parse URL to determine start screen
+  const getInitialScreen = (): ScreenName => {
+    const path = window.location.pathname.toLowerCase();
+    if (path === '/check_in') return 'CHECK_IN';
+    if (path === '/insights') return 'INSIGHTS';
+    if (path === '/settings') return 'SETTINGS';
+    return 'HOME';
+  };
+
+  const [currentScreen, setCurrentScreen] = useState<ScreenName>(getInitialScreen);
   const [editingCheckIn, setEditingCheckIn] = useState<CheckIn | undefined>(undefined);
   
-  // Reminder State
-  const [reminderState, setReminderState] = useState<{ show: boolean, title?: string, message?: string }>({ show: false });
+  // Navigation robustness: Track if we have pushed state in this session
+  const [canGoBack, setCanGoBack] = useState(false);
+
+  // Custom Hooks
+  const { 
+      loading, settings, checkIns, totalCheckInCount, daysTracked, customTags, 
+      setLimit, loadData, updateSettings, updateCustomTag, deleteCustomTag,
+      loadFullHistory, isFullHistoryLoaded, setCheckIns, setTotalCheckInCount 
+  } = useAppData();
   
-  const [limit, setLimit] = useState(PAGE_SIZE);
+  const { reminderState, setReminderState } = useReminders(settings);
+  const { installPrompt, installApp, isIOS, isStandalone } = usePWA();
+  
+  // Adaptive Performance Hooks
+  const { isLowEndDevice, isSlowNetwork, isSaveDataMode } = useAdaptiveConfig();
+
   const [isLoadingInsights, setIsLoadingInsights] = useState(false);
-  const [isFullHistoryLoaded, setIsFullHistoryLoaded] = useState(false);
-  
-  // PWA Install Prompt
-  const [installPrompt, setInstallPrompt] = useState<any>(null);
 
+  // Performance: Preload Insights when idle
+  // ADAPTIVE: Skip preloading if network is slow or data saver is on
   useEffect(() => {
-      const handler = (e: any) => {
-          e.preventDefault();
-          setInstallPrompt(e);
-      };
-      window.addEventListener('beforeinstallprompt', handler);
-      return () => window.removeEventListener('beforeinstallprompt', handler);
-  }, []);
+    if (isSlowNetwork || isSaveDataMode) return;
 
-  const handleInstallApp = async () => {
-      if (!installPrompt) return;
-      installPrompt.prompt();
-      const { outcome } = await installPrompt.userChoice;
-      if (outcome === 'accepted') {
-          setInstallPrompt(null);
-      }
-  };
-
-  const loadData = useCallback(async () => {
-    try {
-      const [s, c, t, count] = await Promise.all([
-        db.getSettings(),
-        db.getRecentStats(limit),
-        db.getCustomTags(),
-        db.getCheckInCount()
-      ]);
-      
-      setTotalCheckInCount(count);
-
-      let diffDays = 0;
-      if (count > 0) {
-          // Optimization: Use getOldestCheckIn instead of fetching all check-ins
-          const oldest = await db.getOldestCheckIn();
-          if (oldest) {
-             diffDays = Math.ceil(Math.abs(Date.now() - oldest.timestamp) / (1000 * 60 * 60 * 24));
-          }
-      }
-      setDaysTracked(diffDays);
-
-      // Unlock Logic
-      if (!s.insightsUnlocked && count > 0) {
-          if (count >= UNLOCK_COUNT_THRESHOLD || diffDays >= UNLOCK_DAYS_THRESHOLD) {
-              const updated = { ...s, insightsUnlocked: true };
-              await db.saveSettings(updated);
-              setSettings(updated);
-          } else {
-              setSettings(s);
-          }
-      } else {
-          setSettings(s);
-      }
-      
-      setCheckIns(c);
-      setCustomTags(t);
-      
-      // Init Reminders
-      handleInitReminders(s);
-
-    } catch (e) {
-      console.error("Failed to load data", e);
-    } finally {
-      setLoading(false);
+    const preload = () => {
+        // Dynamic import to prime the cache
+        import('./screens/InsightsScreen');
+    };
+    
+    if (typeof window !== 'undefined') {
+        const rIC = (window as any).requestIdleCallback;
+        if (rIC) {
+            rIC(preload);
+        } else {
+            setTimeout(preload, 3000);
+        }
     }
-  }, [limit]);
+  }, [isSlowNetwork, isSaveDataMode]);
 
-  const handleInitReminders = (s: AppSettings) => {
-      if (!s.reminders.enabled) return;
-      
-      const nextTime = Scheduler.getNextReminder();
-      
-      // 1. First run ever? Schedule it.
-      if (!nextTime) {
-          Scheduler.scheduleNext(s);
-          return;
-      }
-
-      // 2. Missed Check-in?
-      const now = Date.now();
-      if (now > nextTime) {
-          // User opened app after a scheduled reminder time
-          setReminderState({
-              show: true,
-              title: "Missed Check-in",
-              message: `You had a reminder scheduled for ${new Date(nextTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}. Want to log now?`
-          });
-          // Reschedule immediately to prevent stale state
-          Scheduler.scheduleNext(s);
-      }
-  };
-
+  // Initial Data Load & bfcache restore handler
   useEffect(() => {
     loadData();
-  }, [loadData]);
+
+    // Handle browser back/forward buttons (popstate)
+    const handlePopState = (e: PopStateEvent) => {
+        if (e.state?.screen) {
+          const update = () => setCurrentScreen(e.state.screen);
+          // Disable view transitions on low-end devices or user preference
+          if (document.startViewTransition && !settings?.reducedMotion && !isLowEndDevice) {
+              document.startViewTransition(update);
+          } else {
+              update();
+          }
+        } else {
+          // If state is null (e.g. root load), parse URL again or default to Home
+          setCurrentScreen(getInitialScreen());
+        }
+    };
+    
+    // bfcache optimization
+    const handlePageShow = (event: PageTransitionEvent) => {
+        if (event.persisted) {
+            loadData();
+        }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    window.addEventListener('pageshow', handlePageShow);
+    
+    return () => {
+        window.removeEventListener('popstate', handlePopState);
+        window.removeEventListener('pageshow', handlePageShow);
+    }
+  }, [loadData, settings?.reducedMotion, isLowEndDevice]);
   
+  // Lazy Load Full History for Insights
   useEffect(() => {
       if (currentScreen === 'INSIGHTS' && !isFullHistoryLoaded && !isLoadingInsights) {
           setIsLoadingInsights(true);
-          db.getAllCheckIns().then(all => {
-              setCheckIns(all);
-              setIsFullHistoryLoaded(true);
-              setIsLoadingInsights(false);
-          });
+          loadFullHistory().then(() => setIsLoadingInsights(false));
       }
-  }, [currentScreen, isFullHistoryLoaded, isLoadingInsights]);
+  }, [currentScreen, isFullHistoryLoaded, isLoadingInsights, loadFullHistory]);
 
-  // --- Intelligent Reminder Polling ---
-  useEffect(() => {
-      if (!settings?.reminders.enabled) return;
-      
-      // Check every 30 seconds
-      const interval = setInterval(() => {
-         const nextTime = Scheduler.getNextReminder();
-         if (!nextTime) return;
-         
-         if (Date.now() >= nextTime) {
-             // Trigger Reminder
-             setReminderState({
-                 show: true,
-                 title: "Time to check in",
-                 message: "How are you feeling right now?"
-             });
-             if (Notification.permission === 'granted') {
-                 new Notification("Time to check in", { body: "How are you feeling right now?" });
-             }
-             
-             // Schedule next one immediately
-             Scheduler.scheduleNext(settings);
-         }
-      }, 30000);
-      
-      return () => clearInterval(interval);
-  }, [settings]);
-
+  // Apply Theme & Haptics Settings
   useEffect(() => {
       if (!settings) return;
       const root = document.documentElement;
       root.setAttribute('data-theme', settings.theme);
       settings.highContrast ? root.classList.add('high-contrast') : root.classList.remove('high-contrast');
-      settings.reducedMotion ? root.classList.add('reduced-motion') : root.classList.remove('reduced-motion');
+      
+      // ADAPTIVE: Force reduced motion if device is low-end
+      if (settings.reducedMotion || isLowEndDevice) {
+          root.classList.add('reduced-motion');
+      } else {
+          root.classList.remove('reduced-motion');
+      }
 
-      // Update Meta Theme Color
+      Haptics.setEnabled(settings.hapticsEnabled);
+
       const metaThemeColor = document.querySelector("meta[name=theme-color]");
       if (metaThemeColor) {
           metaThemeColor.setAttribute("content", THEME_COLORS[settings.theme] || THEME_COLORS['original']);
       }
-  }, [settings]);
+  }, [settings, isLowEndDevice]);
 
-  useEffect(() => {
-      const handlePopState = (e: PopStateEvent) => {
-          if (e.state?.screen) {
-            if (document.startViewTransition && !settings?.reducedMotion) {
-                document.startViewTransition(() => {
-                    setCurrentScreen(e.state.screen);
-                });
-            } else {
-                setCurrentScreen(e.state.screen);
-            }
-          }
-          else {
-              setCurrentScreen('HOME');
-          }
-      };
-      window.addEventListener('popstate', handlePopState);
-      return () => window.removeEventListener('popstate', handlePopState);
-  }, [settings?.reducedMotion]);
+  // --- ROBUST NAVIGATION HANDLERS ---
 
-  const navigateTo = (screen: ScreenName) => {
+  const navigateTo = useCallback((screen: ScreenName, replace = false) => {
       const updateScreen = () => {
         setCurrentScreen(screen);
-        window.history.pushState({ screen }, '', screen === 'HOME' ? '/' : `/${screen.toLowerCase()}`);
+        const url = screen === 'HOME' ? '/' : `/${screen.toLowerCase()}`;
+        if (replace) {
+            window.history.replaceState({ screen }, '', url);
+        } else {
+            window.history.pushState({ screen }, '', url);
+            setCanGoBack(true); // We added a history entry, so we can go back
+        }
       };
 
-      if (document.startViewTransition && !settings?.reducedMotion) {
-          document.startViewTransition(() => {
-              updateScreen();
-          });
+      if (document.startViewTransition && !settings?.reducedMotion && !isLowEndDevice) {
+          document.startViewTransition(updateScreen);
       } else {
           updateScreen();
       }
-  }
+  }, [settings?.reducedMotion, isLowEndDevice]);
+
+  // Robust Back Handler: Handles "X" buttons and Back Arrows
+  const handleGoBack = useCallback(() => {
+      // If we are at HOME, we can't really go back within the app.
+      if (currentScreen === 'HOME') return;
+
+      // If we know we have internal history (canGoBack is true), use browser back.
+      // Otherwise (e.g. fresh reload on a sub-page), explicit replace to HOME.
+      if (canGoBack) {
+          window.history.back();
+      } else {
+          navigateTo('HOME', true);
+      }
+  }, [currentScreen, canGoBack, navigateTo]);
 
   const handleCheckInComplete = async () => {
-      // Update data
+      // 1. Refresh Data
       if (isFullHistoryLoaded) {
-          const all = await db.getAllCheckIns();
-          setCheckIns(all);
+          await loadFullHistory();
           const count = await db.getCheckInCount();
           setTotalCheckInCount(count);
       } else {
           await loadData();
       }
       
-      // Update Schedule Logic
+      // 2. Schedule Next
       if (settings?.reminders.enabled) {
          Scheduler.scheduleNext(settings);
       }
 
-      if (document.startViewTransition && !settings?.reducedMotion) {
-          document.startViewTransition(() => {
-            window.history.back();
-            setEditingCheckIn(undefined);
-          });
-      } else {
-          window.history.back();
-          setEditingCheckIn(undefined);
-      }
+      // 3. Robust Redirect
+      navigateTo('HOME', true);
+      setEditingCheckIn(undefined);
   };
 
   const handleUpdateSettings = async (newSettings: AppSettings) => {
-      setSettings(newSettings);
-      await db.saveSettings(newSettings);
-      
-      // Recalculate schedule if settings changed
+      await updateSettings(newSettings);
       if (newSettings.reminders.enabled) {
           Scheduler.scheduleNext(newSettings);
       } else {
@@ -274,24 +256,19 @@ const App: React.FC = () => {
   }
   
   const handleUpdateCustomTag = async (tag: ContextTag) => {
-      await db.saveCustomTag(tag);
-      setCustomTags(prev => {
-          const exists = prev.find(t => t.id === tag.id);
-          let newTags = prev;
-          if (exists) {
-              newTags = prev.map(t => t.id === tag.id ? tag : t);
-          } else {
-              newTags = [...prev, tag];
-          }
-          
-          // Ensure new tag is in the order list
-          if (settings && (!settings.tagOrder || !settings.tagOrder.includes(tag.id))) {
-              const newOrder = settings.tagOrder ? [...settings.tagOrder, tag.id] : [...DEFAULT_TAGS.map(d => d.id), tag.id];
-              handleUpdateSettings({ ...settings, tagOrder: newOrder });
-          }
-          
-          return newTags;
-      });
+      await updateCustomTag(tag);
+      if (settings && (!settings.tagOrder || !settings.tagOrder.includes(tag.id))) {
+          const newOrder = settings.tagOrder ? [...settings.tagOrder, tag.id] : [...DEFAULT_TAGS.map(d => d.id), tag.id];
+          await handleUpdateSettings({ ...settings, tagOrder: newOrder });
+      }
+  };
+
+  const handleSeedData = async () => {
+      await db.seedSampleData();
+      await loadData();
+      if (isFullHistoryLoaded) {
+          await loadFullHistory();
+      }
   };
 
   const handleExportData = async () => {
@@ -317,7 +294,7 @@ const App: React.FC = () => {
           if (typeof text === 'string') {
               try {
                   await db.importData(text);
-                  window.location.reload(); // Reload to reflect changes
+                  window.location.reload();
               } catch (err) {
                   alert("Import failed: Invalid file format.");
               }
@@ -326,26 +303,49 @@ const App: React.FC = () => {
       reader.readAsText(file);
   }
 
-  // Computed property for sorted tags
+  // PERSONALIZATION: Optimize (Smart Sort)
   const sortedAvailableTags = useMemo(() => {
       const all = [...DEFAULT_TAGS, ...customTags];
-      if (!settings?.tagOrder) return all;
       
-      const ordered = settings.tagOrder
-          .map(id => all.find(t => t.id === id))
-          .filter(Boolean) as ContextTag[];
+      // 1. Smart Usage-Based Sorting (If enabled)
+      if (settings?.sortTagsByUsage && checkIns.length > 0) {
+          const counts: Record<string, number> = {};
+          // Count usage for all tags
+          checkIns.forEach(c => c.tags.forEach(t => counts[t] = (counts[t] || 0) + 1));
           
-      // Append any tags not in the order (e.g. just created, or defaults added in future)
-      const unlisted = all.filter(t => !settings.tagOrder!.includes(t.id));
-      return [...ordered, ...unlisted];
-  }, [customTags, settings?.tagOrder]);
+          return [...all].sort((a, b) => {
+              const countA = counts[a.id] || 0;
+              const countB = counts[b.id] || 0;
+              // Sort by frequency (desc), then fall back to default order
+              if (countB !== countA) return countB - countA;
+              return 0; // Maintain stable sort
+          });
+      }
 
-  if (loading || !settings) return <div className="h-screen w-full flex items-center justify-center" style={{ backgroundColor: 'var(--bg-app)' }}><div className="w-8 h-8 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
+      // 2. Manual Sort (Explicit Filter/Sort)
+      if (settings?.tagOrder && settings.tagOrder.length > 0) {
+          const ordered = settings.tagOrder
+            .map(id => all.find(t => t.id === id))
+            .filter(Boolean) as ContextTag[];
+          const unlisted = all.filter(t => !settings.tagOrder!.includes(t.id));
+          return [...ordered, ...unlisted];
+      }
+      
+      return all;
+  }, [customTags, settings?.tagOrder, settings?.sortTagsByUsage, checkIns]);
 
-  if (!settings.hasCompletedOnboarding) return <OnboardingScreen onComplete={() => handleUpdateSettings({ ...settings, hasCompletedOnboarding: true })} />;
+  if (loading || !settings) return <AppSkeleton />;
+
+  if (!settings.hasCompletedOnboarding) {
+      return (
+        <Suspense fallback={<AppSkeleton />}>
+            <OnboardingScreen onComplete={() => handleUpdateSettings({ ...settings, hasCompletedOnboarding: true })} />
+        </Suspense>
+      );
+  }
 
   return (
-    <Layout currentScreen={currentScreen} onNavigate={navigateTo}>
+    <Layout currentScreen={currentScreen} onNavigate={navigateTo} onBack={handleGoBack} onSeedData={handleSeedData}>
         {reminderState.show && (
             <ReminderBanner 
                 title={reminderState.title}
@@ -355,59 +355,66 @@ const App: React.FC = () => {
             />
         )}
         
-        {currentScreen === 'HOME' && (
-            <HomeScreen 
-                recentCheckIns={checkIns} 
-                totalCount={totalCheckInCount}
-                hasMore={checkIns.length < totalCheckInCount}
-                onLoadMore={() => setLimit(prev => prev + PAGE_SIZE)}
-                onCheckIn={() => { setEditingCheckIn(undefined); navigateTo('CHECK_IN'); }} 
-                onEditCheckIn={(ci) => { setEditingCheckIn(ci); navigateTo('CHECK_IN'); }}
-                onDeleteCheckIn={async (id) => { await db.deleteCheckIn(id); loadData(); }}
-                daysTracked={daysTracked}
-                isInsightsUnlocked={settings.insightsUnlocked}
-                showGamification={settings.showGamification}
-                availableTags={sortedAvailableTags}
-            />
-        )}
-        {currentScreen === 'CHECK_IN' && (
-            <CheckInScreen 
-                initialCheckIn={editingCheckIn}
-                onComplete={handleCheckInComplete}
-                onCancel={() => window.history.back()}
-                defaultInputMode={settings.defaultInputMode}
-                availableTags={sortedAvailableTags}
-                onAddTag={handleUpdateCustomTag}
-                enabledScales={settings.enabledScales}
-            />
-        )}
-        {currentScreen === 'INSIGHTS' && (
-            <InsightsScreen 
-                checkIns={checkIns} 
-                customTags={customTags} 
-                settings={settings} 
-                isLoading={isLoadingInsights} 
-                totalCount={totalCheckInCount}
-                onUnlockCheckIn={() => navigateTo('CHECK_IN')}
-            />
-        )}
-        {currentScreen === 'SETTINGS' && (
-            <SettingsScreen 
-                settings={settings}
-                onSaveSettings={handleUpdateSettings}
-                onClearData={async () => { await db.clearData(); window.location.reload(); }}
-                onReplayOnboarding={() => handleUpdateSettings({ ...settings, hasCompletedOnboarding: false })}
-                customTags={customTags}
-                onDeleteCustomTag={async (id) => { await db.deleteCustomTag(id); setCustomTags(prev => prev.filter(t => t.id !== id)); }}
-                onUpdateCustomTag={handleUpdateCustomTag}
-                availableTags={sortedAvailableTags}
-                onDone={() => window.history.back()}
-                installPromptEvent={installPrompt}
-                onInstallApp={handleInstallApp}
-                onExportData={handleExportData}
-                onImportData={handleImportData}
-            />
-        )}
+        <Suspense fallback={<AppSkeleton />}>
+            {currentScreen === 'HOME' && (
+                <HomeScreen 
+                    recentCheckIns={checkIns} 
+                    totalCount={totalCheckInCount}
+                    hasMore={checkIns.length < totalCheckInCount}
+                    onLoadMore={() => setLimit(prev => prev + 20)}
+                    onCheckIn={() => { setEditingCheckIn(undefined); navigateTo('CHECK_IN'); }} 
+                    onEditCheckIn={(ci) => { setEditingCheckIn(ci); navigateTo('CHECK_IN'); }}
+                    onDeleteCheckIn={async (id) => { await db.deleteCheckIn(id); loadData(); }}
+                    daysTracked={daysTracked}
+                    isInsightsUnlocked={settings.insightsUnlocked}
+                    showGamification={settings.showGamification}
+                    availableTags={sortedAvailableTags}
+                    installPrompt={installPrompt}
+                    onInstallApp={installApp}
+                    isIOS={isIOS}
+                    isStandalone={isStandalone}
+                    userName={settings.userName}
+                />
+            )}
+            {currentScreen === 'CHECK_IN' && (
+                <CheckInScreen 
+                    initialCheckIn={editingCheckIn}
+                    onComplete={handleCheckInComplete}
+                    onCancel={handleGoBack}
+                    defaultInputMode={settings.defaultInputMode}
+                    availableTags={sortedAvailableTags}
+                    onAddTag={handleUpdateCustomTag}
+                    enabledScales={settings.enabledScales}
+                />
+            )}
+            {currentScreen === 'INSIGHTS' && (
+                <InsightsScreen 
+                    checkIns={checkIns} 
+                    customTags={customTags} 
+                    settings={settings} 
+                    isLoading={isLoadingInsights} 
+                    totalCount={totalCheckInCount}
+                    onUnlockCheckIn={() => navigateTo('CHECK_IN')}
+                />
+            )}
+            {currentScreen === 'SETTINGS' && (
+                <SettingsScreen 
+                    settings={settings}
+                    onSaveSettings={handleUpdateSettings}
+                    onClearData={async () => { await db.clearData(); window.location.reload(); }}
+                    onReplayOnboarding={() => handleUpdateSettings({ ...settings, hasCompletedOnboarding: false })}
+                    customTags={customTags}
+                    onDeleteCustomTag={deleteCustomTag}
+                    onUpdateCustomTag={handleUpdateCustomTag}
+                    availableTags={sortedAvailableTags}
+                    onDone={handleGoBack}
+                    installPromptEvent={installPrompt}
+                    onInstallApp={installApp}
+                    onExportData={handleExportData}
+                    onImportData={handleImportData}
+                />
+            )}
+        </Suspense>
     </Layout>
   );
 };

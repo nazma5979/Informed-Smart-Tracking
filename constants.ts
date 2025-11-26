@@ -137,14 +137,39 @@ buildTree('bad', badTree, ROOT_COLORS.bad.bg, ROOT_COLORS.bad.text);
 
 export const FEELING_NODES = nodes;
 
+// --- SCIENTIFIC DIMENSIONAL MAPPING ---
+// Maps root emotion categories to the Valence-Arousal-Dominance (VAD) vector space.
+// Values range from -1.0 to 1.0 (approximated from Warriner et al., 2013).
+// Valence: Unpleasant (-1) to Pleasant (1)
+// Arousal: Deactivated (-1) to Activated (1)
+// Dominance: Submissive (-1) to Dominant (1)
+
+export interface VADVector {
+  valence: number;
+  arousal: number;
+  dominance: number;
+}
+
+export const ROOT_VAD_MAP: Record<string, VADVector> = {
+  'happy': { valence: 0.85, arousal: 0.25, dominance: 0.75 },    // High pleasure, moderate energy
+  'sad': { valence: -0.65, arousal: -0.35, dominance: -0.55 },   // Low pleasure, low energy, low control
+  'angry': { valence: -0.55, arousal: 0.75, dominance: 0.55 },   // Low pleasure, high energy, moderate control
+  'fearful': { valence: -0.65, arousal: 0.65, dominance: -0.65 },// Low pleasure, high energy, low control
+  'disgusted': { valence: -0.6, arousal: 0.35, dominance: 0.1 }, // Low pleasure, mod energy
+  'surprised': { valence: 0.4, arousal: 0.85, dominance: -0.1 }, // Mod pleasure, high energy
+  'bad': { valence: -0.4, arousal: -0.2, dominance: -0.2 },      // General negative
+};
+
 // Helper to get children
 export const getChildren = (parentId: string | null): FeelingNode[] => {
+  if (!FEELING_NODES) return [];
   return Object.values(FEELING_NODES).filter(node => node.parentId === parentId);
 };
 
 // Helper to get the full path of emotions for a given node ID
 export const getEmotionPath = (nodeId: string): FeelingNode[] => {
   const path: FeelingNode[] = [];
+  if (!FEELING_NODES) return path;
   let current = FEELING_NODES[nodeId];
   while (current) {
     path.unshift(current);

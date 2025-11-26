@@ -1,22 +1,59 @@
 {
+  "id": "mood-patterns-v1",
   "name": "Mood Patterns",
   "short_name": "Mood Patterns",
-  "description": "An offline-first, private Ecological Momentary Assessment (EMA) diary. Log emotions quickly using a hierarchical wheel, track context, and view local insights.",
+  "description": "An offline-first, private Ecological Momentary Assessment (EMA) diary. Log feelings, track context, and view local insights.",
   "start_url": "/",
   "display": "standalone",
+  "categories": [
+    "health",
+    "lifestyle",
+    "productivity"
+  ],
+  "orientation": "any",
   "background_color": "#f8fafc",
   "theme_color": "#4f46e5",
   "icons": [
     {
       "src": "https://cdn-icons-png.flaticon.com/512/9722/9722703.png",
       "type": "image/png",
-      "sizes": "192x192"
+      "sizes": "192x192",
+      "purpose": "any maskable"
     },
     {
       "src": "https://cdn-icons-png.flaticon.com/512/9722/9722703.png",
       "type": "image/png",
-      "sizes": "512x512"
+      "sizes": "512x512",
+      "purpose": "any maskable"
     }
   ],
-  "requestFramePermissions": []
+  "shortcuts": [
+    {
+      "name": "New Check-in",
+      "short_name": "Check-in",
+      "description": "Log how you are feeling right now",
+      "url": "/check_in",
+      "icons": [
+        {
+          "src": "https://cdn-icons-png.flaticon.com/512/9722/9722703.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "View Insights",
+      "short_name": "Insights",
+      "description": "View your mood trends",
+      "url": "/insights",
+      "icons": [
+        {
+          "src": "https://cdn-icons-png.flaticon.com/512/9722/9722703.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ],
+  "requestFramePermissions": [
+    "microphone"
+  ]
 }

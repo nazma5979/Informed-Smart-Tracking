@@ -88,16 +88,20 @@ export type Theme = 'original' | 'light' | 'dark' | 'sepia' | 'grey' | 'pastel';
 export type InputMode = 'WHEEL' | 'LIST';
 
 export interface AppSettings {
+  userName?: string; // Personalization Level 1: Identify
   reminders: ReminderConfig;
   hasCompletedOnboarding: boolean;
   insightsUnlocked: boolean; // New persistent flag
+  clinicalModeEnabled: boolean; // Advanced Mode Flag
   highContrast: boolean;
   reducedMotion: boolean;
+  hapticsEnabled: boolean;
   defaultInputMode: InputMode;
   theme: Theme;
   enabledScales: string[]; // IDs of enabled scales
   customScales: Scale[]; // User defined scales
   tagOrder?: string[]; // Custom sort order for tags
+  sortTagsByUsage: boolean; // Personalization Level 3: Optimize
   showGamification: boolean; // Opt-in gamification features
 }
 

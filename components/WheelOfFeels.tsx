@@ -2,8 +2,9 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { getChildren } from '../constants';
 import { FeelingNode } from '../types';
-import { ArrowLeft, Check, RotateCw, MousePointerClick, CircleDot, ChevronRight, ChevronLeft } from 'lucide-react';
+import { ArrowLeft, Check, RotateCw, MousePointerClick, ChevronRight, ChevronLeft } from 'lucide-react';
 import { Haptics } from '../utils/haptics';
+import { useAdaptiveConfig } from '../hooks/useAdaptiveConfig';
 
 interface WheelOfFeelsProps {
   selectedIds: string[];
@@ -55,6 +56,9 @@ const WheelOfFeels: React.FC<WheelOfFeelsProps> = ({ selectedIds, primaryId, onT
   const [rotationOffset, setRotationOffset] = useState(0);
   const [swipeX, setSwipeX] = useState(0);
   
+  // Adaptive Config
+  const { isLowEndDevice } = useAdaptiveConfig();
+  
   // Interaction State
   const [interactingSliceId, setInteractingSliceId] = useState<string | null>(null);
 
@@ -76,6 +80,13 @@ const WheelOfFeels: React.FC<WheelOfFeelsProps> = ({ selectedIds, primaryId, onT
     return getChildren(currentParent ? currentParent.id : null);
   }, [currentParent]);
 
+  // Reset rotation when navigating deeper/back
+  useEffect(() => {
+    setRotationOffset(0);
+    lastRotation.current = 0;
+    setSwipeX(0);
+  }, [currentParent?.id]);
+
   // Handle resize to invalidate rect cache
   useEffect(() => {
       const handleResize = () => { rectCache.current = null; };
@@ -89,9 +100,6 @@ const WheelOfFeels: React.FC<WheelOfFeelsProps> = ({ selectedIds, primaryId, onT
       if (getChildren(node.id).length > 0) {
           Haptics.medium(); // Tactile thud for entering a new level
           onHistoryChange([...history, node]);
-          setRotationOffset(0); 
-          lastRotation.current = 0;
-          setSwipeX(0);
           return true;
       }
       return false;
@@ -101,9 +109,6 @@ const WheelOfFeels: React.FC<WheelOfFeelsProps> = ({ selectedIds, primaryId, onT
     if (history.length === 0) return;
     Haptics.medium();
     onHistoryChange(history.slice(0, -1));
-    setRotationOffset(0);
-    lastRotation.current = 0;
-    setSwipeX(0);
   };
 
   // --- Gesture Logic (Unified) ---
@@ -120,7 +125,10 @@ const WheelOfFeels: React.FC<WheelOfFeelsProps> = ({ selectedIds, primaryId, onT
   };
 
   const handlePointerDown = (e: React.PointerEvent, sliceId: string | null) => {
-      // Prevent default touch actions to avoid browser scroll interference
+      // STOP PROPAGATION is critical here to prevent background handler from overriding slice handler
+      e.stopPropagation();
+      e.preventDefault(); // Prevent native scrolling/highlighting
+
       if (svgRef.current) rectCache.current = svgRef.current.getBoundingClientRect();
       
       gestureStart.current = { x: e.clientX, y: e.clientY };
@@ -177,6 +185,7 @@ const WheelOfFeels: React.FC<WheelOfFeelsProps> = ({ selectedIds, primaryId, onT
   };
 
   const handlePointerUp = (e: React.PointerEvent, slice: FeelingNode | null) => {
+      e.stopPropagation();
       (e.target as Element).releasePointerCapture(e.pointerId);
       
       if (gestureMode.current === 'SWIPE') {
@@ -186,35 +195,29 @@ const WheelOfFeels: React.FC<WheelOfFeelsProps> = ({ selectedIds, primaryId, onT
               handleBack();
           } else if (swipeX < -100) {
               // Left Swipe -> Forward
-              // Only go forward if there is exactly one selected child, or if the interacting slice has children
               const selectedChildren = visibleEmotions.filter(em => selectedIds.includes(em.id));
-              
               let target: FeelingNode | undefined;
-              // Priority 1: The slice user started swiping on
+              
               if (slice && getChildren(slice.id).length > 0) {
                   target = slice;
-              }
-              // Priority 2: The single selected slice
-              else if (selectedChildren.length === 1 && getChildren(selectedChildren[0].id).length > 0) {
+              } else if (selectedChildren.length === 1 && getChildren(selectedChildren[0].id).length > 0) {
                   target = selectedChildren[0];
               }
 
               if (target) {
                   handleDrillDown(target);
               } else {
-                  // Bounce back
-                  setSwipeX(0);
+                  setSwipeX(0); // Bounce back
               }
           } else {
-              // Reset
-              setSwipeX(0);
+              setSwipeX(0); // Reset
           }
       } 
       else if (gestureMode.current === 'ROTATE') {
           // Just end rotation
       }
       else {
-          // Click / Tap (No significant movement)
+          // Click / Tap (Distance < 10px implied by gestureMode === IDLE)
           if (slice) {
               const hasChildren = getChildren(slice.id).length > 0;
               if (hasChildren) {
@@ -231,7 +234,7 @@ const WheelOfFeels: React.FC<WheelOfFeelsProps> = ({ selectedIds, primaryId, onT
 
       // Cleanup
       gestureStart.current = null;
-      if (gestureMode.current !== 'SWIPE') setSwipeX(0); // Ensure reset
+      if (gestureMode.current !== 'SWIPE') setSwipeX(0); 
       gestureMode.current = 'IDLE';
       setInteractingSliceId(null);
       rectCache.current = null;
@@ -282,12 +285,13 @@ const WheelOfFeels: React.FC<WheelOfFeelsProps> = ({ selectedIds, primaryId, onT
   return (
     <div 
         className={`relative flex flex-col items-center justify-center select-none ${className}`} 
-        style={{ touchAction: 'none' }} // Critical for custom gestures
+        style={{ touchAction: 'none' }} 
     >
+      {/* Internal Back Button - Relocated for clarity */}
       {history.length > 0 && (
         <button 
-          onClick={handleBack}
-          className="absolute top-0 left-0 p-2.5 rounded-full bg-card/90 backdrop-blur-sm shadow-sm border border-theme hover:bg-accent-light hover:text-accent transition-colors z-30 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[var(--color-accent)]"
+          onClick={(e) => { e.stopPropagation(); handleBack(); }}
+          className="absolute top-4 left-4 p-2.5 rounded-full bg-white/90 shadow-md border border-slate-200 text-secondary hover:text-primary hover:bg-white transition-all z-40 active:scale-95"
           aria-label="Zoom Out"
         >
           <ArrowLeft className="w-5 h-5" />
@@ -312,12 +316,13 @@ const WheelOfFeels: React.FC<WheelOfFeelsProps> = ({ selectedIds, primaryId, onT
           className="relative transition-transform duration-75 ease-out will-change-transform" 
           style={{ width: size, height: size, transform: `translateX(${swipeX}px)` }}
       >
+        {/* Adaptive Loading: Removed drop-shadow on low-end devices for performance */}
         <svg 
             ref={svgRef}
             width={size} 
             height={size} 
             viewBox={`0 0 ${size} ${size}`} 
-            className={`transform drop-shadow-sm touch-none ${interactingSliceId ? 'cursor-grabbing' : 'cursor-grab'}`}
+            className={`transform touch-none ${!isLowEndDevice ? 'drop-shadow-sm' : ''} ${interactingSliceId ? 'cursor-grabbing' : 'cursor-grab'}`}
             onPointerDown={(e) => handlePointerDown(e, null)}
             onPointerMove={handlePointerMove}
             onPointerUp={(e) => handlePointerUp(e, null)}
@@ -359,7 +364,7 @@ const WheelOfFeels: React.FC<WheelOfFeelsProps> = ({ selectedIds, primaryId, onT
                         transform: isInteracting ? 'scale(0.96)' : 'scale(1)',
                         transition: 'transform 100ms ease-out'
                     }}
-                    onPointerDown={(e) => handlePointerDown(e, emotion.id)} // Pass ID to differentiate
+                    onPointerDown={(e) => handlePointerDown(e, emotion.id)}
                     onPointerMove={handlePointerMove}
                     onPointerUp={(e) => handlePointerUp(e, emotion)}
                     role="button"
@@ -375,7 +380,11 @@ const WheelOfFeels: React.FC<WheelOfFeelsProps> = ({ selectedIds, primaryId, onT
                     className={`transition-colors duration-200 ${isSelected ? 'brightness-90' : ''} outline-none focus-visible:stroke-[var(--color-accent)] focus-visible:stroke-4 focus-visible:z-10`}
                     style={{ stroke: isSelected ? 'var(--text-primary)' : 'var(--bg-card)' }} 
                   />
-                  <path d={path} fill="url(#sliceGradient)" className="pointer-events-none" style={{ mixBlendMode: 'overlay' }} />
+                  
+                  {/* Adaptive Loading: Only render expensive mix-blend-mode overlay on capable devices */}
+                  {!isLowEndDevice && (
+                    <path d={path} fill="url(#sliceGradient)" className="pointer-events-none" style={{ mixBlendMode: 'overlay' }} />
+                  )}
                   
                   <text
                     x={textPos.x}
